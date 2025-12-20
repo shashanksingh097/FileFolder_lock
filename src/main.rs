@@ -11,14 +11,15 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Lock { path, attempts } => {
+            Commands::Lock { path, attempts } => {
+            let attempts = attempts.max(1);
+
             let data = fs::read(&path).expect("Failed to read file");
 
             println!("Enter password:");
             let password = read_password().unwrap();
 
             let payload = Payload {
-                attempts_left: attempts,
                 original_name: path.clone(),
                 file_data: data,
             };
@@ -29,6 +30,7 @@ fn main() {
 
             let mut output = Vec::new();
             output.extend(b"LOCKR1");
+            output.push(attempts); // attempts_left (PLAIN HEADER)
             output.extend(salt);
             output.extend(nonce);
             output.extend(encrypted);
@@ -40,11 +42,17 @@ fn main() {
         }
 
         Commands::Unlock { path } => {
-            let data = fs::read(&path).expect("Failed to read file");
+            let mut data = fs::read(&path).expect("Failed to read file");
 
-            let salt = &data[6..22];
-            let nonce = &data[22..34];
-            let encrypted = &data[34..];
+            let attempts_left = data[6];
+            let salt = &data[7..23];
+            let nonce = &data[23..35];
+            let encrypted = &data[35..];
+
+            if attempts_left == 0 {
+                println!("File permanently locked");
+                return;
+            }
 
             println!("Enter password:");
             let password = read_password().unwrap();
@@ -60,9 +68,20 @@ fn main() {
                     println!("Unlocked successfully");
                 }
                 Err(_) => {
-                    println!("Wrong password");
+                    let remaining = attempts_left - 1;
+                    data[6] = remaining;
+
+                    fs::write(&path, &data).unwrap();
+
+                    if remaining == 0 {
+                        core::destroy::destroy_file(&path);
+                        println!("Too many attempts. File destroyed permanently.");
+                    } else {
+                        println!("Wrong password. Attempts left: {}", remaining);
+                    }
                 }
             }
         }
     }
+
 }
