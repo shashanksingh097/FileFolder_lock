@@ -8,6 +8,7 @@ pub struct FolderEntry {
 
 #[derive(Serialize, Deserialize)]
 pub struct Payload {
+    pub is_dir: bool,          // 👈 NEW
     pub root_name: String,
     pub entries: Vec<FolderEntry>,
 }

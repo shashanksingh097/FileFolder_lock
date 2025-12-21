@@ -25,7 +25,6 @@ fn main() {
             let parent = abs_path.parent().unwrap_or(Path::new("."));
             let name = abs_path.file_name().unwrap().to_string_lossy().to_string();
 
-            // ---------------- CONFIRMATION ----------------
             if !force {
                 println!("⚠️  WARNING: This action is DESTRUCTIVE.");
                 println!("The original data will be DELETED after locking.");
@@ -35,9 +34,8 @@ fn main() {
 
                 let mut confirm = String::new();
                 io::stdin().read_line(&mut confirm).unwrap();
-                let confirm = confirm.trim();
 
-                if confirm != name {
+                if confirm.trim() != name {
                     println!("❌ Confirmation failed. Aborting.");
                     return;
                 }
@@ -140,7 +138,9 @@ fn normalize_to_absolute(input: &str) -> PathBuf {
 // ---------------- LOCK HELPERS ----------------
 fn lock_single_file(path: &Path) -> Payload {
     let data = fs::read(path).unwrap();
+
     Payload {
+        is_dir: false, // ✅ FIX
         root_name: path.file_name().unwrap().to_string_lossy().to_string(),
         entries: vec![FolderEntry {
             relative_path: path.file_name().unwrap().to_string_lossy().to_string(),
@@ -170,19 +170,29 @@ fn lock_folder(path: &Path) -> Payload {
         }
     }
 
-    Payload { root_name: root, entries }
+    Payload {
+        is_dir: true, // ✅ FIX
+        root_name: root,
+        entries,
+    }
 }
 
 // ---------------- RESTORE ----------------
 fn restore_payload(payload: &Payload, parent: &Path) {
-    let root = parent.join(&payload.root_name);
-    fs::create_dir_all(&root).unwrap();
+    if payload.is_dir {
+        let root = parent.join(&payload.root_name);
+        fs::create_dir_all(&root).unwrap();
 
-    for entry in &payload.entries {
-        let full = root.join(&entry.relative_path);
-        if let Some(p) = full.parent() {
-            fs::create_dir_all(p).unwrap();
+        for entry in &payload.entries {
+            let full = root.join(&entry.relative_path);
+            if let Some(p) = full.parent() {
+                fs::create_dir_all(p).unwrap();
+            }
+            fs::write(full, &entry.data).unwrap();
         }
-        fs::write(full, &entry.data).unwrap();
+    } else {
+        // ✅ SINGLE FILE RESTORE (NO FOLDER)
+        let file_path = parent.join(&payload.root_name);
+        fs::write(file_path, &payload.entries[0].data).unwrap();
     }
 }
