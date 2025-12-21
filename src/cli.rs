@@ -13,12 +13,18 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Lock a file or folder
+    /// Lock a file or folder (DESTRUCTIVE)
     Lock {
+        /// Path to file or folder
         path: String,
 
+        /// Maximum wrong password attempts
         #[arg(short, long, default_value = "3")]
         attempts: u8,
+
+        /// Skip confirmation (DANGEROUS)
+        #[arg(long)]
+        force: bool,
     },
 
     /// Unlock a file or folder

@@ -6,6 +6,7 @@ use cli::{Cli, Commands};
 use core::metadata::{Payload, FolderEntry};
 use rpassword::read_password;
 use std::fs;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
@@ -13,7 +14,7 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Lock { path, attempts } => {
+        Commands::Lock { path, attempts, force } => {
             let attempts = attempts.max(1);
             let abs_path = normalize_to_absolute(&path);
 
@@ -23,6 +24,24 @@ fn main() {
 
             let parent = abs_path.parent().unwrap_or(Path::new("."));
             let name = abs_path.file_name().unwrap().to_string_lossy().to_string();
+
+            // ---------------- CONFIRMATION ----------------
+            if !force {
+                println!("⚠️  WARNING: This action is DESTRUCTIVE.");
+                println!("The original data will be DELETED after locking.");
+                println!("Target: {}", abs_path.display());
+                print!("Type the name to confirm [{}]: ", name);
+                io::stdout().flush().unwrap();
+
+                let mut confirm = String::new();
+                io::stdin().read_line(&mut confirm).unwrap();
+                let confirm = confirm.trim();
+
+                if confirm != name {
+                    println!("❌ Confirmation failed. Aborting.");
+                    return;
+                }
+            }
 
             println!("Enter password:");
             let password = read_password().unwrap();
@@ -54,7 +73,7 @@ fn main() {
                 fs::remove_dir_all(&abs_path).unwrap();
             }
 
-            println!("Locked → {}", out_path.display());
+            println!("🔒 Locked → {}", out_path.display());
         }
 
         Commands::Unlock { path } => {
@@ -65,10 +84,9 @@ fn main() {
             }
 
             let restore_parent = abs_lkr.parent().unwrap_or(Path::new("."));
-
             let mut data = fs::read(&abs_lkr).unwrap();
-            let attempts_left = data[6];
 
+            let attempts_left = data[6];
             if attempts_left == 0 {
                 println!("File permanently locked");
                 return;
@@ -89,7 +107,7 @@ fn main() {
                     restore_payload(&payload, restore_parent);
                     fs::remove_file(&abs_lkr).unwrap();
 
-                    println!("Unlocked successfully");
+                    println!("🔓 Unlocked successfully");
                 }
                 Err(_) => {
                     let remaining = attempts_left - 1;
@@ -98,9 +116,9 @@ fn main() {
 
                     if remaining == 0 {
                         core::destroy::destroy_file(abs_lkr.to_str().unwrap());
-                        println!("Too many attempts. Data destroyed.");
+                        println!("💥 Too many attempts. Data destroyed.");
                     } else {
-                        println!("Wrong password. Attempts left: {}", remaining);
+                        println!("❌ Wrong password. Attempts left: {}", remaining);
                     }
                 }
             }
@@ -108,7 +126,7 @@ fn main() {
     }
 }
 
-/// Absolute + Windows-safe
+// ---------------- PATH NORMALIZATION ----------------
 fn normalize_to_absolute(input: &str) -> PathBuf {
     let path = PathBuf::from(input);
     let abs = if path.is_absolute() {
@@ -119,6 +137,7 @@ fn normalize_to_absolute(input: &str) -> PathBuf {
     abs.canonicalize().unwrap_or(abs)
 }
 
+// ---------------- LOCK HELPERS ----------------
 fn lock_single_file(path: &Path) -> Payload {
     let data = fs::read(path).unwrap();
     Payload {
@@ -154,6 +173,7 @@ fn lock_folder(path: &Path) -> Payload {
     Payload { root_name: root, entries }
 }
 
+// ---------------- RESTORE ----------------
 fn restore_payload(payload: &Payload, parent: &Path) {
     let root = parent.join(&payload.root_name);
     fs::create_dir_all(&root).unwrap();
