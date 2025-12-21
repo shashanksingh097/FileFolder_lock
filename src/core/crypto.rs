@@ -21,9 +21,7 @@ pub fn encrypt(data: &[u8], password: &str) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     OsRng.fill_bytes(&mut nonce_bytes);
     let nonce = Nonce::from_slice(&nonce_bytes);
 
-    let encrypted = cipher
-        .encrypt(nonce, data)
-        .expect("Encryption failed");
+    let encrypted = cipher.encrypt(nonce, data).expect("Encrypt failed");
 
     (salt.to_vec(), nonce_bytes.to_vec(), encrypted)
 }
@@ -44,7 +42,5 @@ pub fn decrypt(
     let key = Key::<Aes256Gcm>::from_slice(&key_bytes);
     let cipher = Aes256Gcm::new(key);
 
-    cipher
-        .decrypt(Nonce::from_slice(nonce), encrypted)
-        .map_err(|_| ())
+    cipher.decrypt(Nonce::from_slice(nonce), encrypted).map_err(|_| ())
 }
