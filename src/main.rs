@@ -16,7 +16,7 @@ fn main() {
         Commands::Lock { path, attempts } => {
             let attempts = attempts.max(1);
 
-            // --- Normalize to absolute path FIRST ---
+            // ✅ SAFE normalization
             let abs_path = normalize_to_absolute(&path);
 
             if !abs_path.exists() {
@@ -30,7 +30,6 @@ fn main() {
                 .to_string_lossy()
                 .to_string();
 
-            // Ask password ONLY after validation
             println!("Enter password:");
             let password = read_password().unwrap();
 
@@ -95,7 +94,6 @@ fn main() {
 
                     restore_payload(&payload);
                     fs::remove_file(&abs_lkr).unwrap();
-
                     println!("Unlocked successfully");
                 }
                 Err(_) => {
@@ -115,33 +113,23 @@ fn main() {
     }
 }
 
-// --------------------------------------------------
-// ABSOLUTE PATH NORMALIZATION
-// --------------------------------------------------
+/// ✅ Windows-safe, slash-safe normalization
 fn normalize_to_absolute(input: &str) -> PathBuf {
-    let mut path = PathBuf::from(input);
+    let path = PathBuf::from(input);
 
-    if !path.is_absolute() {
-        path = std::env::current_dir().unwrap().join(path);
-    }
+    // Convert to absolute
+    let abs = if path.is_absolute() {
+        path
+    } else {
+        std::env::current_dir().unwrap().join(path)
+    };
 
-    // Remove trailing slashes safely
-    while path
-        .to_string_lossy()
-        .ends_with('\\') || path.to_string_lossy().ends_with('/')
-    {
-        path.pop();
-    }
-
-    path
+    // Canonicalize ONLY if possible (handles trailing slashes correctly)
+    abs.canonicalize().unwrap_or(abs)
 }
 
-// --------------------------------------------------
-// FILE LOCK
-// --------------------------------------------------
 fn lock_single_file(path: &Path) -> Payload {
     let data = fs::read(path).unwrap();
-
     Payload {
         root_name: path.file_name().unwrap().to_string_lossy().to_string(),
         entries: vec![FolderEntry {
@@ -151,9 +139,6 @@ fn lock_single_file(path: &Path) -> Payload {
     }
 }
 
-// --------------------------------------------------
-// FOLDER LOCK
-// --------------------------------------------------
 fn lock_folder(path: &Path) -> Payload {
     let root = path.file_name().unwrap().to_string_lossy().to_string();
     let mut entries = Vec::new();
@@ -178,9 +163,6 @@ fn lock_folder(path: &Path) -> Payload {
     Payload { root_name: root, entries }
 }
 
-// --------------------------------------------------
-// RESTORE
-// --------------------------------------------------
 fn restore_payload(payload: &Payload) {
     let root = PathBuf::from(&payload.root_name);
     fs::create_dir_all(&root).unwrap();
