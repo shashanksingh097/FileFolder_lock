@@ -15,8 +15,6 @@ fn main() {
     match cli.command {
         Commands::Lock { path, attempts } => {
             let attempts = attempts.max(1);
-
-            // ✅ SAFE normalization
             let abs_path = normalize_to_absolute(&path);
 
             if !abs_path.exists() {
@@ -24,21 +22,15 @@ fn main() {
             }
 
             let parent = abs_path.parent().unwrap_or(Path::new("."));
-            let name = abs_path
-                .file_name()
-                .expect("Invalid path")
-                .to_string_lossy()
-                .to_string();
+            let name = abs_path.file_name().unwrap().to_string_lossy().to_string();
 
             println!("Enter password:");
             let password = read_password().unwrap();
 
             let payload = if abs_path.is_file() {
                 lock_single_file(&abs_path)
-            } else if abs_path.is_dir() {
-                lock_folder(&abs_path)
             } else {
-                panic!("Invalid path");
+                lock_folder(&abs_path)
             };
 
             let serialized = bincode::serialize(&payload).unwrap();
@@ -69,12 +61,14 @@ fn main() {
             let abs_lkr = normalize_to_absolute(&path);
 
             if !abs_lkr.exists() {
-                panic!("Locked file not found: {}", abs_lkr.display());
+                panic!("Locked file not found");
             }
 
-            let mut data = fs::read(&abs_lkr).unwrap();
+            let restore_parent = abs_lkr.parent().unwrap_or(Path::new("."));
 
+            let mut data = fs::read(&abs_lkr).unwrap();
             let attempts_left = data[6];
+
             if attempts_left == 0 {
                 println!("File permanently locked");
                 return;
@@ -92,8 +86,9 @@ fn main() {
                     let payload: Payload =
                         bincode::deserialize(&serialized).unwrap();
 
-                    restore_payload(&payload);
+                    restore_payload(&payload, restore_parent);
                     fs::remove_file(&abs_lkr).unwrap();
+
                     println!("Unlocked successfully");
                 }
                 Err(_) => {
@@ -103,7 +98,7 @@ fn main() {
 
                     if remaining == 0 {
                         core::destroy::destroy_file(abs_lkr.to_str().unwrap());
-                        println!("Too many attempts. Data destroyed permanently.");
+                        println!("Too many attempts. Data destroyed.");
                     } else {
                         println!("Wrong password. Attempts left: {}", remaining);
                     }
@@ -113,18 +108,14 @@ fn main() {
     }
 }
 
-/// ✅ Windows-safe, slash-safe normalization
+/// Absolute + Windows-safe
 fn normalize_to_absolute(input: &str) -> PathBuf {
     let path = PathBuf::from(input);
-
-    // Convert to absolute
     let abs = if path.is_absolute() {
         path
     } else {
         std::env::current_dir().unwrap().join(path)
     };
-
-    // Canonicalize ONLY if possible (handles trailing slashes correctly)
     abs.canonicalize().unwrap_or(abs)
 }
 
@@ -163,14 +154,14 @@ fn lock_folder(path: &Path) -> Payload {
     Payload { root_name: root, entries }
 }
 
-fn restore_payload(payload: &Payload) {
-    let root = PathBuf::from(&payload.root_name);
+fn restore_payload(payload: &Payload, parent: &Path) {
+    let root = parent.join(&payload.root_name);
     fs::create_dir_all(&root).unwrap();
 
     for entry in &payload.entries {
         let full = root.join(&entry.relative_path);
-        if let Some(parent) = full.parent() {
-            fs::create_dir_all(parent).unwrap();
+        if let Some(p) = full.parent() {
+            fs::create_dir_all(p).unwrap();
         }
         fs::write(full, &entry.data).unwrap();
     }
